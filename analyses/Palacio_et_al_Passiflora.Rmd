@@ -1,0 +1,412 @@
+---
+title: "On the adequacy of fruit removal as a proxy for fitness in studies of phenotypic selection"
+author: 'Code author: Facundo X. Palacio'
+date: "`r Sys.Date()`"
+output: 
+  tufte::tufte_html:
+    toc: true
+---
+
+\ 
+
+This document presents an overview of the analyses in the main text. It highlights the essential R code used to conduct these analyses, but does not display code related to table and plot aesthetics. The code for this document is provided in **palacio_et_al_Passiflora.Rmd** and is available at https://github.com/facuxpalacio/Passiflora_fitness. 
+
+
+```{r setup, include = FALSE}
+# Suppress messages, warnings and errors for document aesthetics.
+knitr::opts_chunk$set(message = FALSE, warning = FALSE, error = FALSE, echo = TRUE)
+```
+
+```{r packages, results = 'hide'}
+# Load required libraries.
+library(lme4) # Fitting generalized linear mixed models
+library(lmerTest) # P-values for GLMMs
+library(MuMIn) # Computing R2
+library(MVN) # Assessing multivariate normality
+library(car) # Computing variance inflation factors
+library(boot) # Bootstrapping
+library(ggplot2) # Plotting
+library(ggdist) # Plotting
+library(dplyr) # Managing data
+library(reshape2) # Managing data
+library(relaimpo) # Assessing relative importance of predictors
+library(mgcv) # Fitting generalized additive models
+```
+
+## Predict the number of seeds removed from fruit diameter
+
+```{r}
+data <- read.table("C:/RD/Passiflora_fruits.txt", head = TRUE)
+intact_fruits <- data %>% filter(aspect == "intact")
+m1 <- glmer.nb(seedn_obs ~ diameter_mm + (1|idpopulation/idplant), data = intact_fruits)
+r.squaredGLMM(m1)
+pecked_fruits <- data %>% filter(aspect == "slightly_pecked"| aspect == "highly_pecked")
+# Check names (with pecked fruits and without intact fruits)
+pecked2 <- pecked_fruits[pecked_fruits$idplant %in% intact_fruits$idplant, ]
+
+# Predictions from GLMM
+pred.pecked <- data.frame(idfruit_visit = pecked2$idfruit_visit, 
+                          y = predict(m1, newdata = pecked2, type = "response"))
+```
+
+\
+
+## Descriptive summary
+
+```{r summary}
+data %>% filter(aspect == "intact") %>%
+group_by(idpopulation) %>% 
+summarise(xseedn = mean(seedn_obs, na.rm = TRUE),
+          xdiam = mean(diameter_mm, na.rm = TRUE),
+          xmass = mean(mass_g, na.rm = TRUE),
+          cvdiam = 100*sd(diameter_mm, na.rm = TRUE)/mean(diameter_mm, na.rm = TRUE),
+          cvmass = 100*sd(mass_g, na.rm = TRUE)/mean(mass_g, na.rm = TRUE),
+          cvseedn = 100*sd(seedn_obs, na.rm = TRUE)/mean(seedn_obs, na.rm = TRUE),
+          sddiam = sd(diameter_mm, na.rm = TRUE),
+          sdmass = sd(mass_g, na.rm = TRUE),
+          sdseedn = sd(seedn_obs, na.rm = TRUE),
+          n = n())
+```
+
+Number of seeds removed  
+
+```{r, seeds removed}
+data %>% filter(aspect == "slightly_pecked"| aspect == "highly_pecked") %>%
+group_by(idpopulation) %>%
+summarise(xseedn_rem = mean(seedn_rem, na.rm = TRUE),
+          sdseedn_rem = sd(seedn_rem, na.rm = TRUE)) 
+```  
+
+Fruit diameter comparison between intact and pecked fruits
+
+```{r, raincloud plot}
+data$aspect2 <- ifelse(data$aspect == "slightly_pecked"|data$aspect == "highly_pecked",
+                        "Pecked", "Intact")
+
+ggplot(data = data, aes(x = aspect2, y = diameter_mm, col = aspect2)) + 
+  stat_halfeye(aes(fill = data$aspect2),adjust = 0.5, width = 0.7, .width = 0,
+               justification = -0.2, alpha = 0.5) + 
+  geom_boxplot(width = 0.2, outlier.shape = NA) + 
+  geom_jitter(width = 0.05, alpha = 0.3) + facet_wrap(~idpopulation) + 
+  theme_bw() + xlab("Fruit aspect") + ylab("Diameter (mm)")
+```
+
+## Fruit number-seed number trade-off
+
+```{r fruit-seed tradeoff}
+data <- read.table("C:/RD/Passiflora_selection_analysis.txt", header = TRUE)
+m2 <- lmer(xseedn ~ log(fruit.crop) + (1|idpopulation), data = data)
+summary(m2)
+r.squaredGLMM(m2)
+```
+
+\
+
+## Natural selection analyses
+The workflow presented here is modified from [Palacio et al. (2019)](https://brill.com/view/journals/ijee/65/3-4/article-p130_130.xml).
+
+Load the dataset
+
+```{r data}
+data <- read.table("C:/RD/Passiflora_selection_analysis.txt", header = TRUE)
+lp <- subset(data, idpopulation == "La_Plata")
+sf <- subset(data, idpopulation == "Santa_Fe")
+tu <- subset(data, idpopulation == "Tucuman")
+```
+
+To perform a selection analysis for a given population, just replace the corresponding population object name with the new object 'data'.
+
+```{r example data}
+data <- lp
+```
+
+\
+
+## Step 1. Relative fitness computation and phenotypic trait standardization
+
+```{r fitness and traits}
+# Fitness component 1: number of fruits pecked
+data$W1 <- data$fruits.removed
+data$wrel1 <- data$W1/mean(data$W1)
+
+# Fitness component 2: mean number of seeds removed
+data$W2 <- data$xseeds.removed
+data$wrel2 <- data$W2/mean(data$W2)
+
+# Total fitness: number of fruits pecked x mean number of seeds removed
+data$W3 <- data$fruits.removed*data$xseeds.removed
+data$wrel3 <- data$W3/mean(data$W3)
+
+data$x1 <- data$fruit.crop
+data$x2 <- data$xdiam
+data$x3 <- data$xseedn
+
+data$z1 <- (data$x1 - mean(data$x1))/sd(data$x1)
+data$z2 <- (data$x2 - mean(data$x2))/sd(data$x2)
+data$z3 <- (data$x3 - mean(data$x3))/sd(data$x3)
+```
+
+\
+
+## Relative importance of fitness components
+The contribution of each fitness component to total fitness was assessed by fitting a linear model between (log) total fitness and both (log) fitness components and computing the average $R^2$  for each predictor over orderings among predictors (LMG metric).
+
+```{r  predictor importance}
+total.fitness.model <- lm(log(W3 + 1) ~ log(W1 + 1) + log(W2 + 1), data = data)
+rel.importance <- calc.relimp(total.fitness.model, b = 1000, type = "lmg")
+rel.importance
+```
+
+\
+
+## Step 2. Testing normality of phenotypic traits
+
+```{r multivariate normality}
+# Trait histograms
+ggplot(data = data, aes(x = z1)) + xlim(-2, 4) +
+       geom_histogram(aes(y = ..density..), col = "black", fill = "gray", binwidth = 0.5, alpha = 0.5) +  
+       geom_density(col = "red", fill = "red", alpha = 0.3) + theme_classic()
+ggplot(data = data, aes(x = z2)) + xlim(-4, 4) +
+       geom_histogram(aes(y = ..density..), col = "black", fill = "gray", binwidth = 0.5, alpha = 0.5) +  
+       geom_density(col = "red", fill = "red", alpha = 0.3) + theme_classic()
+ggplot(data = data, aes(x = z3)) + xlim(-4, 4) +
+       geom_histogram(aes(y = ..density..), col = "black", fill = "gray", binwidth = 0.5, alpha = 0.5) +  
+       geom_density(col = "red", fill = "red", alpha = 0.3) + theme_classic()
+
+# Multivariate normality tests
+MVN::mvn(data.frame(data$z1, data$z2), mvnTest = "hz")$multivariateNormality
+MVN::mvn(data.frame(data$z1, data$z2), mvnTest = "royston")$multivariateNormality
+
+# Q-Q plots
+qqnorm(data$z1, cex = 1.5, pch = 19, col = rgb(red = 0, green = 0, blue = 0, alpha = 0.3), main = "")
+qqline(data$z1, col = "red", lwd = 2)
+qqnorm(data$z2, cex = 1.5, pch = 19, col = rgb(red = 0, green = 0, blue = 0, alpha = 0.3), main = "")
+qqline(data$z2, col = "red", lwd = 2)
+qqnorm(data$z3, cex = 1.5, pch = 19, col = rgb(red = 0, green = 0, blue = 0, alpha = 0.3), main = "")
+qqline(data$z3, col = "red", lwd = 2)
+```
+
+\
+
+## Step 3. Assessing collinearity of phenotypic traits
+
+```{r collinearity}
+# Pearson correlation between traits
+round(cor(data[, c("z1", "z2", "z3")]), 2)
+
+# Variance inflation factor on (linear) Lande and Arnold's model
+lin.grad1 <- lm(wrel1 ~ z1 + z2 + z3, data = data)
+vif(lin.grad1)
+summary(lin.grad1)$coeff
+
+lin.grad2 <- lm(wrel2 ~ z1 + z2 + z3, data = data)
+lin.grad3 <- lm(wrel3 ~ z1 + z2 + z3, data = data)
+```
+
+\
+
+## Step 4. Checking model residuals
+
+```{r model residuals}
+# Shapiro-Wilk test
+shapiro.test(resid(lin.grad1))
+shapiro.test(resid(lin.grad2))
+shapiro.test(resid(lin.grad3))
+
+# Q-Q plots
+qqnorm(resid(lin.grad1), cex = 1.5, pch = 19, col = rgb(red = 0, green = 0, blue = 0, alpha = 0.3), main = "")
+qqline(resid(lin.grad1), col = "red", lwd = 2)
+qqnorm(resid(lin.grad2), cex = 1.5, pch = 19, col = rgb(red = 0, green = 0, blue = 0, alpha = 0.3), main = "")
+qqline(resid(lin.grad2), col = "red", lwd = 2)
+qqnorm(resid(lin.grad3), cex = 1.5, pch = 19, col = rgb(red = 0, green = 0, blue = 0, alpha = 0.3), main = "")
+qqline(resid(lin.grad3), col = "red", lwd = 2)
+```
+
+\
+
+## Step 5. Standard error and confidence interval estimation
+For the function *grad*, the data must have the relative fitness in the first column and standardized variables in the remaining columns. The function returns a vector with linear, quadratic and correlational gradients, and represents the input for the function *boot*.
+
+```{r grad function}
+grad <- function(data, original = c(1:nrow(data))){
+  data <- data[original, ]
+  vars  <- colnames(data)[-1]
+  colnames(data)[1] <- "Wrel"
+  model.lin <- as.formula(paste("Wrel", paste(vars, collapse=" + "), sep=" ~ "))
+  m1 <- lm(formula = model.lin, data = data)
+  
+  part1 <- paste("(", paste(vars, collapse=" + "), ")^2", sep = "")
+  part2 <- paste("I(0.5*(", vars, "^2))", sep = "", collapse = " + ")
+  model.qua <- as.formula <- paste("Wrel", paste(part1, part2, sep = " + "), sep = " ~ ")
+  m2 <- lm(formula = model.qua, data = data)
+  
+  sel.grad<-c(m1$coefficients[-1], m2$coefficients[-c(1:ncol(data))])
+  return(sel.grad)
+}
+
+newdata <- data.frame(data[, c("wrel3", "z1", "z2", "z3")])
+selection.gradients <- grad(data = newdata)
+nsamples <- 1000
+boot.grad <- boot(data = newdata, statistic = grad, R = nsamples)
+
+# Create a list with 95% bias-corrected bootstrap confidence intervals for each gradient and p-values.
+CI <- list()
+for(i in 1:length(boot.grad$t0)){
+  CI[[i]] <- boot.ci(boot.grad, conf = 0.95, type = "bca", index = i)$bca[4:5]
+}
+names(CI) <- names(boot.grad$t0)
+
+results <- data.frame(grad = selection.gradients,
+                      se = apply(boot.grad$t, 2, sd, na.rm = TRUE),
+                      low.CI = t(as.data.frame(CI)[1, ]),
+                      upp.CI = t(as.data.frame(CI)[2, ]),
+                      p = apply(boot.grad$t, 2, function(x) length(x[x<0])/nsamples))
+results
+```
+
+\
+
+## Step 6. Plotting Lande & Arnold's model results
+```{r L&A plots}
+# Linear selection + bootstrap samples
+# Example: fruit crop size vs number of fruits pecked
+new.z1 <- seq(-1, 4, length = 100)
+pred.z1 <- predict(lin.grad1, 
+                   newdata = data.frame(z1 = new.z1, z2 = 0, z3 = 0))
+new <- data.frame(z1 = new.z1, wrel = pred.z1)
+
+boot.y <- as.data.frame(matrix(NA, nrow = nrow(boot.grad$t), ncol = 100))
+for(i in 1:nrow(boot.grad$t)){
+boot.y[i,] <- 1 + boot.grad$t[i, 1]*new.z1
+}
+boot.y <- as.data.frame(t(boot.y))
+boot.y$z1 <- new.z1
+boot.melted <- melt(boot.y, id.vars = "z1")
+
+ggplot() + 
+geom_point(data = data, aes(x = z1, y = wrel1), size = 5) +
+geom_line(data = boot.melted, aes(x = z1, y = value, group = variable), col = "gray", alpha = 0.1) +
+xlab("Standardized fruit crop size") + 
+geom_line(data = new, aes(x = z1, y = wrel), col = "red", size = 2) +
+ylab("Relative fitness (number of pecked fruits)") +
+theme_bw()
+```
+
+\
+
+## Simulations of the effect of the fruit number-seed number trade-off on seed dispersal
+
+Set simulation parameters
+
+```{r simulation}
+set.seed(1001)
+# Number of simulations
+nsim <- 10000
+# Number of plants per population
+nplants <- 500
+```
+
+Simulate fruit crop size and different fruit number-seed number trade-offs. Extract model coefficients.
+```{r crop and removal}
+# Fruit crop size
+crop <- seq(1, 500, length = nplants)
+# Assumption 1: fruit removal correlates positively with fruit crop size
+rem <- rbinom(n = nplants, size = crop, prob = 0.7)
+
+b <- seq(-0.5, 0, length = nsim) # fruit number-seed number trade-offs
+l <- c()
+q <- c()
+x <- c()
+cv <- c()
+
+for(i in 1:nsim){
+# Assumption 2: negative relationship between fruit crop size and seed number (seed size-number trade-off)
+  xseeds <- rpois(n = nplants, lambda = 100*exp(b[i]*rem)) # Mean number of seeds dispersed
+  fitness <- rem*xseeds # Total fitness
+  m <- glm(fitness ~ rem + I(rem^2), family = poisson)
+  l[i] <- coef(m)[2] # Linear effect 
+  q[i] <- coef(m)[3] # Non-linear effect
+  x[i] <- mean(xseeds) # Mean number of seeds dispersed
+  cv[i] <- 100*sd(xseeds)/mean(xseeds) # Coefficient of variation in seed removal
+}
+
+df <- data.frame(b, l, q, x, cv) 
+```
+
+Seed size-number trade-off vs fruit removal-fitness quadratic term
+
+```{r tradeoff effect}
+m1 <- gam(q ~ s(b), data = df)
+df$pred1 <- predict(m1, newdata = df)
+ggplot() +
+  geom_point(data = df, aes(x = b, y = q), size = 3, alpha = 0.1, col = "gray") +
+  geom_line(data = df, aes(x = b, y = pred1), size = 1.5, col = "darkorchid") +
+  xlab(expression(paste(beta, " (seeds ~ crop)"))) + 
+  ylab("Quadratic coefficient (fitness ~ fruit removal)") +
+  theme_bw()
+```
+
+Coefficient of variation in seed number vs fruit removal-fitness correlation
+
+```{r cv}
+m2 <- gam(q ~ s(cv), data = df)
+df$pred2 <- predict(m2, newdata = df)
+ggplot() + 
+  geom_point(data = df, aes(x = cv, y = q), size = 3, alpha = 0.1, col = "gray") +
+  geom_line(data = df, aes(x = cv, y = pred2), size = 1.5, col = "darkorchid") +
+  xlab("CV seed number (%)") + 
+  ylab("Quadratic coefficient (fitness ~ fruit removal)") +
+  theme_bw()
+```
+
+Examples of the relationship between fruit removal and total fitness for different trade-off values ($\beta_i$).
+
+$\beta$ = -0.2
+
+```{r beta1}
+seeds <- rpois(n = nplants, lambda = 100*exp(-0.2*rem))
+fitness <- rem*seeds
+ggplot() + 
+  geom_point(data = data.frame(rem, fitness), aes(x = rem, y = fitness), 
+             size = 3, alpha = 0.3, col = "orange") +
+  xlab("Number of fruits removed") + 
+  ylab("Total fitness") + theme_bw()
+```
+
+$\beta$ = -0.1
+
+```{r beta2}
+seeds <- rpois(n = nplants, lambda = 100*exp(-0.1*rem))
+fitness <- rem*seeds
+ggplot() + 
+  geom_point(data = data.frame(rem, fitness), aes(x = rem, y = fitness), 
+             size = 3, alpha = 0.3, col = "orange") +
+  xlab("Number of fruits removed") + 
+  ylab("Total fitness") + theme_bw()
+```
+
+$\beta$ = -0.01
+
+```{r beta3}
+seeds <- rpois(n = nplants, lambda = 100*exp(-0.01*rem))
+fitness <- rem*seeds
+ggplot() + 
+  geom_point(data = data.frame(rem, fitness), aes(x = rem, y = fitness), 
+             size = 3, alpha = 0.3, col = "orange") +
+   xlab("Number of fruits removed") + 
+   ylab("Total fitness") + theme_bw()
+```
+
+$\beta$ = -0.001
+
+```{r beta4}
+seeds <- rpois(n = nplants, lambda = 100*exp(-0.001*rem))
+fitness <- rem*seeds
+ggplot() + 
+  geom_point(data = data.frame(rem, fitness), aes(x = rem, y = fitness), 
+             size = 3, alpha = 0.3, col = "orange")+
+  xlab("Number of fruits removed") + 
+  ylab("Total fitness") + theme_bw()
+```
+
+
