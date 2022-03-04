@@ -1,6 +1,6 @@
 # Passiflora_fitness
 This repository contains data and code to reproduce analyses reported in the manuscript "*On the adequacy of fruit removal as a proxy for fitness in studies of
-phenotypic selection*".
+animal-mediated phenotypic selection*".
 
 # Repository structure
 
