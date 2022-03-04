@@ -1,5 +1,6 @@
 ---
-title: "On the adequacy of fruit removal as a proxy for fitness in studies of phenotypic selection"
+title: "On the adequacy of fruit removal as a proxy for fitness in studies of animal-mediated phenotypic selection"
+subtitle: "Supplementary information"
 author: 'Code author: Facundo X. Palacio'
 date: "`r Sys.Date()`"
 output: 
@@ -9,7 +10,7 @@ output:
 
 \ 
 
-This document presents an overview of the analyses in the main text. It highlights the essential R code used to conduct these analyses, but does not display code related to table and plot aesthetics. The code for this document is provided in **palacio_et_al_Passiflora.Rmd** and is available at https://github.com/facuxpalacio/Passiflora_fitness. 
+This document presents an overview of the analyses in the main text. It highlights the essential R code used to conduct these analyses, but does not display code related to table and plot aesthetics. The code for this document is provided in **Palacio_et_al_Passiflora.Rmd** and is available at https://github.com/facuxpalacio/Passiflora_fitness. 
 
 
 ```{r setup, include = FALSE}
@@ -36,7 +37,7 @@ library(mgcv) # Fitting generalized additive models
 ## Predict the number of seeds removed from fruit diameter
 
 ```{r}
-data <- read.table("C:/RD/Passiflora_fruits.txt", head = TRUE)
+data <- read.table("../data/Passiflora_fruits.txt", head = TRUE)
 intact_fruits <- data %>% filter(aspect == "intact")
 m1 <- glmer.nb(seedn_obs ~ diameter_mm + (1|idpopulation/idplant), data = intact_fruits)
 r.squaredGLMM(m1)
@@ -44,28 +45,28 @@ pecked_fruits <- data %>% filter(aspect == "slightly_pecked"| aspect == "highly_
 # Check names (with pecked fruits and without intact fruits)
 pecked2 <- pecked_fruits[pecked_fruits$idplant %in% intact_fruits$idplant, ]
 
-# Predictions from GLMM
+# Predictions from the GLMM
 pred.pecked <- data.frame(idfruit_visit = pecked2$idfruit_visit, 
                           y = predict(m1, newdata = pecked2, type = "response"))
 ```
 
 \
 
-## Descriptive summary
+## Data summary
 
 ```{r summary}
 data %>% filter(aspect == "intact") %>%
 group_by(idpopulation) %>% 
-summarise(xseedn = mean(seedn_obs, na.rm = TRUE),
-          xdiam = mean(diameter_mm, na.rm = TRUE),
-          xmass = mean(mass_g, na.rm = TRUE),
-          cvdiam = 100*sd(diameter_mm, na.rm = TRUE)/mean(diameter_mm, na.rm = TRUE),
-          cvmass = 100*sd(mass_g, na.rm = TRUE)/mean(mass_g, na.rm = TRUE),
-          cvseedn = 100*sd(seedn_obs, na.rm = TRUE)/mean(seedn_obs, na.rm = TRUE),
-          sddiam = sd(diameter_mm, na.rm = TRUE),
-          sdmass = sd(mass_g, na.rm = TRUE),
-          sdseedn = sd(seedn_obs, na.rm = TRUE),
-          n = n())
+summarise(xseedn = round(mean(seedn_obs, na.rm = TRUE), 2),
+          xdiam = round(mean(diameter_mm, na.rm = TRUE), 2),
+          xmass = round(mean(mass_g, na.rm = TRUE), 2),
+          cvdiam = round(100*sd(diameter_mm, na.rm = TRUE)/mean(diameter_mm, na.rm = TRUE), 2),
+          cvmass = round(100*sd(mass_g, na.rm = TRUE)/mean(mass_g, na.rm = TRUE), 2),
+          cvseedn = round(100*sd(seedn_obs, na.rm = TRUE)/mean(seedn_obs, na.rm = TRUE), 2),
+          sddiam = round(sd(diameter_mm, na.rm = TRUE), 2),
+          sdmass = round(sd(mass_g, na.rm = TRUE), 2),
+          sdseedn = round(sd(seedn_obs, na.rm = TRUE), 2),
+          n = n()) %>% knitr::kable(.)
 ```
 
 Number of seeds removed  
@@ -73,8 +74,9 @@ Number of seeds removed
 ```{r, seeds removed}
 data %>% filter(aspect == "slightly_pecked"| aspect == "highly_pecked") %>%
 group_by(idpopulation) %>%
-summarise(xseedn_rem = mean(seedn_rem, na.rm = TRUE),
-          sdseedn_rem = sd(seedn_rem, na.rm = TRUE)) 
+summarise(xseedn_rem = round(mean(seedn_rem, na.rm = TRUE), 2),
+          sdseedn_rem = round(sd(seedn_rem, na.rm = TRUE), 2)) %>% 
+knitr::kable(.)
 ```  
 
 Fruit diameter comparison between intact and pecked fruits
@@ -94,10 +96,36 @@ ggplot(data = data, aes(x = aspect2, y = diameter_mm, col = aspect2)) +
 ## Fruit number-seed number trade-off
 
 ```{r fruit-seed tradeoff}
-data <- read.table("C:/RD/Passiflora_selection_analysis.txt", header = TRUE)
+data <- read.table("../data/Passiflora_selection_analysis.txt", header = TRUE)
 m2 <- lmer(xseedn ~ log(fruit.crop) + (1|idpopulation), data = data)
 summary(m2)
-r.squaredGLMM(m2)
+r.squaredGLMM(m2) %>% round(., 3) %>% 
+  knitr::kable(.)
+```
+
+\
+
+## Fruit crop size-fruit removal correlation
+
+```{r, crop-removal corr}
+passi <- read.table("../data/Passiflora_plant_monitoring.txt", head = TRUE)
+m.corr1 <- glmer.nb(npecked_fruits ~ log(fruit_crop + 1) + (1|idpopulation/idplant) + (1|visit_number), data = passi)
+summary(m.corr1)
+r.squaredGLMM(m.corr1) %>% round(., 3) %>%
+  knitr::kable(.)
+```
+
+\
+
+## Fruit removal-seed removal correlation
+
+```{r, fruit-seed removal corr}
+passi$visit_number <- as.factor(passi$visit_number)
+visits23 <- passi %>% filter(visit_number == c(2, 3))
+m.corr2 <- glmer.nb(seed_rem ~ log(npecked_fruits + 1) + visit_number + (1|idpopulation/idplant), data = visits23)
+summary(m.corr2)
+r.squaredGLMM(m.corr2) %>% round(., 3) %>%
+  knitr::kable(.)
 ```
 
 \
@@ -108,7 +136,7 @@ The workflow presented here is modified from [Palacio et al. (2019)](https://bri
 Load the dataset
 
 ```{r data}
-data <- read.table("C:/RD/Passiflora_selection_analysis.txt", header = TRUE)
+data <- read.table("../data/Passiflora_selection_analysis.txt", header = TRUE)
 lp <- subset(data, idpopulation == "La_Plata")
 sf <- subset(data, idpopulation == "Santa_Fe")
 tu <- subset(data, idpopulation == "Tucuman")
@@ -153,8 +181,8 @@ The contribution of each fitness component to total fitness was assessed by fitt
 
 ```{r  predictor importance}
 total.fitness.model <- lm(log(W3 + 1) ~ log(W1 + 1) + log(W2 + 1), data = data)
-rel.importance <- calc.relimp(total.fitness.model, b = 1000, type = "lmg")
-rel.importance
+calc.relimp(total.fitness.model, b = 1000, type = "lmg")@lmg %>%
+  knitr::kable(.)
 ```
 
 \
@@ -192,12 +220,15 @@ qqline(data$z3, col = "red", lwd = 2)
 
 ```{r collinearity}
 # Pearson correlation between traits
-round(cor(data[, c("z1", "z2", "z3")]), 2)
+data %>% dplyr::select(z1, z2, z3) %>% cor() %>% round(., 2) %>%
+knitr::kable(.)
 
 # Variance inflation factor on (linear) Lande and Arnold's model
 lin.grad1 <- lm(wrel1 ~ z1 + z2 + z3, data = data)
-vif(lin.grad1)
-summary(lin.grad1)$coeff
+vif(lin.grad1) %>% round(., 2) %>%
+  knitr::kable(.)
+summary(lin.grad1)$coeff %>% round(., 3) %>%
+  knitr::kable(.)
 
 lin.grad2 <- lm(wrel2 ~ z1 + z2 + z3, data = data)
 lin.grad3 <- lm(wrel3 ~ z1 + z2 + z3, data = data)
@@ -244,7 +275,7 @@ grad <- function(data, original = c(1:nrow(data))){
   return(sel.grad)
 }
 
-newdata <- data.frame(data[, c("wrel3", "z1", "z2", "z3")])
+newdata <- data.frame(data[, c("wrel1", "z1", "z2", "z3")])
 selection.gradients <- grad(data = newdata)
 nsamples <- 1000
 boot.grad <- boot(data = newdata, statistic = grad, R = nsamples)
@@ -256,12 +287,12 @@ for(i in 1:length(boot.grad$t0)){
 }
 names(CI) <- names(boot.grad$t0)
 
-results <- data.frame(grad = selection.gradients,
-                      se = apply(boot.grad$t, 2, sd, na.rm = TRUE),
-                      low.CI = t(as.data.frame(CI)[1, ]),
-                      upp.CI = t(as.data.frame(CI)[2, ]),
-                      p = apply(boot.grad$t, 2, function(x) length(x[x<0])/nsamples))
-results
+data.frame(grad = selection.gradients,
+           se = apply(boot.grad$t, 2, sd, na.rm = TRUE),
+           low.CI = t(as.data.frame(CI)[1, ]),
+           upp.CI = t(as.data.frame(CI)[2, ]),
+           p = apply(boot.grad$t, 2, function(x) length(x[x<0])/nsamples)) %>%
+  round(., 2) %>% knitr::kable(.)
 ```
 
 \
@@ -298,7 +329,7 @@ theme_bw()
 
 Set simulation parameters
 
-```{r simulation}
+```{r simulations}
 set.seed(1001)
 # Number of simulations
 nsim <- 10000
