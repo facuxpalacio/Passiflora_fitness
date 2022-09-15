@@ -52,7 +52,7 @@ pred.pecked <- data.frame(idfruit_visit = pecked2$idfruit_visit,
 
 \
 
-## Data summary
+## Fruit trait summary
 
 ```{r summary}
 data %>% filter(aspect == "intact") %>%
@@ -74,9 +74,9 @@ Number of seeds removed
 ```{r, seeds removed}
 data %>% filter(aspect == "slightly_pecked"| aspect == "highly_pecked") %>%
 group_by(idpopulation) %>%
-summarise(xseedn_rem = round(mean(seedn_rem, na.rm = TRUE), 2),
-          sdseedn_rem = round(sd(seedn_rem, na.rm = TRUE), 2)) %>% 
-knitr::kable(.)
+summarise(xseedn_rem = mean(seedn_rem, na.rm = TRUE),
+          sdseedn_rem = sd(seedn_rem, na.rm = TRUE)) %>% 
+knitr::kable(., digits = 2)
 ```  
 
 Fruit diameter comparison between intact and pecked fruits
@@ -99,8 +99,7 @@ ggplot(data = data, aes(x = aspect2, y = diameter_mm, col = aspect2)) +
 data <- read.table("../data/Passiflora_selection_analysis.txt", header = TRUE)
 m2 <- lmer(xseedn ~ log(fruit.crop) + (1|idpopulation), data = data)
 summary(m2)
-r.squaredGLMM(m2) %>% round(., 3) %>% 
-  knitr::kable(.)
+r.squaredGLMM(m2) %>%  knitr::kable(., digits = 3)
 ```
 
 \
@@ -109,10 +108,10 @@ r.squaredGLMM(m2) %>% round(., 3) %>%
 
 ```{r, crop-removal corr}
 passi <- read.table("../data/Passiflora_plant_monitoring.txt", head = TRUE)
-m.corr1 <- glmer.nb(npecked_fruits ~ log(fruit_crop + 1) + (1|idpopulation/idplant) + (1|visit_number), data = passi)
+passi$visit_number <- as.factor(passi$visit_number)
+m.corr1 <- glmer.nb(npecked_fruits ~ log(fruit_crop + 1) + visit_number + (1|idpopulation/idplant), data = passi)
 summary(m.corr1)
-r.squaredGLMM(m.corr1) %>% round(., 3) %>%
-  knitr::kable(.)
+r.squaredGLMM(m.corr1) %>% knitr::kable(., digits = 2)
 ```
 
 \
@@ -124,8 +123,7 @@ passi$visit_number <- as.factor(passi$visit_number)
 visits23 <- passi %>% filter(visit_number == c(2, 3))
 m.corr2 <- glmer.nb(seed_rem ~ log(npecked_fruits + 1) + visit_number + (1|idpopulation/idplant), data = visits23)
 summary(m.corr2)
-r.squaredGLMM(m.corr2) %>% round(., 3) %>%
-  knitr::kable(.)
+r.squaredGLMM(m.corr2) %>% knitr::kable(., digits = 2)
 ```
 
 \
@@ -142,7 +140,7 @@ sf <- subset(data, idpopulation == "Santa_Fe")
 tu <- subset(data, idpopulation == "Tucuman")
 ```
 
-To perform a selection analysis for a given population, just replace the corresponding population object name with the new object 'data'.
+To perform a selection analysis for a given population, just replace the corresponding population object name with the new object 'data'. In this example, we have used La Plata population.
 
 ```{r example data}
 data <- lp
@@ -153,7 +151,7 @@ data <- lp
 ## Step 1. Relative fitness computation and phenotypic trait standardization
 
 ```{r fitness and traits}
-# Fitness component 1: number of fruits pecked
+# Fitness component: number of fruits pecked
 data$W1 <- data$fruits.removed
 data$wrel1 <- data$W1/mean(data$W1)
 
@@ -176,13 +174,16 @@ data$z3 <- (data$x3 - mean(data$x3))/sd(data$x3)
 
 \
 
-## Relative importance of fitness components
+### Relative importance of fitness components
 The contribution of each fitness component to total fitness was assessed by fitting a linear model between (log) total fitness and both (log) fitness components and computing the average $R^2$  for each predictor over orderings among predictors (LMG metric).
 
 ```{r  predictor importance}
 total.fitness.model <- lm(log(W3 + 1) ~ log(W1 + 1) + log(W2 + 1), data = data)
-calc.relimp(total.fitness.model, b = 1000, type = "lmg")@lmg %>%
-  knitr::kable(.)
+r2 <- calc.relimp(total.fitness.model, b = 1000, type = "lmg")@lmg 
+r2 <- as.data.frame(r2)
+rownames(r2) <- c("Fruit_removal", "Seed_removal")
+names(r2) <- "R2"
+r2 %>% knitr::kable(., digits = 3)
 ```
 
 \
@@ -220,18 +221,17 @@ qqline(data$z3, col = "red", lwd = 2)
 
 ```{r collinearity}
 # Pearson correlation between traits
-data %>% dplyr::select(z1, z2, z3) %>% cor() %>% round(., 2) %>%
-knitr::kable(.)
+data %>% dplyr::select(z1, z2, z3) %>% cor() %>%
+knitr::kable(., digits = 2)
 
 # Variance inflation factor on (linear) Lande and Arnold's model
 lin.grad1 <- lm(wrel1 ~ z1 + z2 + z3, data = data)
-vif(lin.grad1) %>% round(., 2) %>%
-  knitr::kable(.)
-summary(lin.grad1)$coeff %>% round(., 3) %>%
-  knitr::kable(.)
+vif(lin.grad1) %>% knitr::kable(., digits = 2)
+summary(lin.grad1)$coeff %>% knitr::kable(., digits = 2)
 
-lin.grad2 <- lm(wrel2 ~ z1 + z2 + z3, data = data)
 lin.grad3 <- lm(wrel3 ~ z1 + z2 + z3, data = data)
+summary(lin.grad3)$coeff %>% knitr::kable(., digits = 2)
+vif(lin.grad3) %>% knitr::kable(., digits = 2)
 ```
 
 \
@@ -241,14 +241,11 @@ lin.grad3 <- lm(wrel3 ~ z1 + z2 + z3, data = data)
 ```{r model residuals}
 # Shapiro-Wilk test
 shapiro.test(resid(lin.grad1))
-shapiro.test(resid(lin.grad2))
 shapiro.test(resid(lin.grad3))
 
 # Q-Q plots
 qqnorm(resid(lin.grad1), cex = 1.5, pch = 19, col = rgb(red = 0, green = 0, blue = 0, alpha = 0.3), main = "")
 qqline(resid(lin.grad1), col = "red", lwd = 2)
-qqnorm(resid(lin.grad2), cex = 1.5, pch = 19, col = rgb(red = 0, green = 0, blue = 0, alpha = 0.3), main = "")
-qqline(resid(lin.grad2), col = "red", lwd = 2)
 qqnorm(resid(lin.grad3), cex = 1.5, pch = 19, col = rgb(red = 0, green = 0, blue = 0, alpha = 0.3), main = "")
 qqline(resid(lin.grad3), col = "red", lwd = 2)
 ```
@@ -287,12 +284,13 @@ for(i in 1:length(boot.grad$t0)){
 }
 names(CI) <- names(boot.grad$t0)
 
-data.frame(grad = selection.gradients,
-           se = apply(boot.grad$t, 2, sd, na.rm = TRUE),
-           low.CI = t(as.data.frame(CI)[1, ]),
-           upp.CI = t(as.data.frame(CI)[2, ]),
-           p = apply(boot.grad$t, 2, function(x) length(x[x<0])/nsamples)) %>%
-  round(., 2) %>% knitr::kable(.)
+gradients <- data.frame(gradient = selection.gradients,
+           standard_error = apply(boot.grad$t, 2, sd, na.rm = TRUE),
+           low.95.conf_interval = as.numeric(as.data.frame(CI)[1, ]),
+           upp.95.conf_interval = as.numeric(as.data.frame(CI)[2, ]),
+           p = apply(boot.grad$t, 2, function(x) length(x[x<0])/nsamples))
+
+gradients %>% slice(1:3) %>% knitr::kable(., digits = 2)
 ```
 
 \
